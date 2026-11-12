@@ -1,0 +1,331 @@
+{
+  "n_designs": 12,
+  "paths": 4000,
+  "seed": 2026,
+  "depth": 0.358874508663847,
+  "collapse_definition": ">= 90% below the pre-shock price in more than 50% of paths",
+  "crash_scenarios": [
+    "crash",
+    "crash_at_unlock",
+    "bear"
+  ],
+  "collapsed_in_crashes": 7,
+  "collapsed_designs": [
+    "algo_stable",
+    "leveraged_collateral",
+    "liquidity_farm",
+    "lowfloat_vc",
+    "memecoin",
+    "play_to_earn",
+    "ve_lock"
+  ],
+  "survived_designs": [
+    "burn_mint",
+    "fair_launch",
+    "pos_l1",
+    "rebase_pol",
+    "revenue_buyback"
+  ],
+  "collapsed_by_scenario": {
+    "baseline": [],
+    "crash": [
+      "algo_stable",
+      "leveraged_collateral",
+      "liquidity_farm",
+      "lowfloat_vc",
+      "memecoin",
+      "play_to_earn",
+      "ve_lock"
+    ],
+    "crash_at_unlock": [
+      "algo_stable",
+      "leveraged_collateral",
+      "liquidity_farm",
+      "lowfloat_vc",
+      "memecoin",
+      "play_to_earn",
+      "ve_lock"
+    ],
+    "bear": [
+      "algo_stable",
+      "leveraged_collateral",
+      "liquidity_farm",
+      "lowfloat_vc",
+      "memecoin",
+      "play_to_earn",
+      "ve_lock"
+    ],
+    "demand": [
+      "algo_stable",
+      "lowfloat_vc",
+      "memecoin",
+      "play_to_earn",
+      "ve_lock"
+    ],
+    "liquidity": [
+      "lowfloat_vc",
+      "play_to_earn",
+      "ve_lock"
+    ]
+  },
+  "close_calls": [
+    {
+      "design": "pos_l1",
+      "scenario": "bear",
+      "p_collapse": 0.47025
+    },
+    {
+      "design": "ve_lock",
+      "scenario": "crash",
+      "p_collapse": 0.53725
+    },
+    {
+      "design": "ve_lock",
+      "scenario": "crash_at_unlock",
+      "p_collapse": 0.53725
+    },
+    {
+      "design": "liquidity_farm",
+      "scenario": "crash",
+      "p_collapse": 0.50375
+    },
+    {
+      "design": "liquidity_farm",
+      "scenario": "crash_at_unlock",
+      "p_collapse": 0.50375
+    }
+  ],
+  "sensitivity": {
+    "paths": 2000,
+    "crash_severity": {
+      "30%": {
+        "count": 1,
+        "designs": [
+          "memecoin"
+        ]
+      },
+      "40%": {
+        "count": 2,
+        "designs": [
+          "play_to_earn",
+          "memecoin"
+        ]
+      },
+      "50%": {
+        "count": 2,
+        "designs": [
+          "play_to_earn",
+          "memecoin"
+        ]
+      },
+      "60%": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "70%": {
+        "count": 8,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "rebase_pol",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "80%": {
+        "count": 11,
+        "designs": [
+          "fair_launch",
+          "revenue_buyback",
+          "pos_l1",
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "rebase_pol",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      }
+    },
+    "collapse_threshold": {
+      "80%": {
+        "count": 10,
+        "designs": [
+          "revenue_buyback",
+          "pos_l1",
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "rebase_pol",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "85%": {
+        "count": 8,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "rebase_pol",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "90%": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "95%": {
+        "count": 2,
+        "designs": [
+          "play_to_earn",
+          "memecoin"
+        ]
+      }
+    },
+    "market_depth": {
+      "x0.5": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "x0.75": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "x1.0": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "x1.5": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "x2.0": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      }
+    },
+    "seeds": {
+      "1": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "2": {
+        "count": 7,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "liquidity_farm",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "3": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "4": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      },
+      "5": {
+        "count": 6,
+        "designs": [
+          "ve_lock",
+          "lowfloat_vc",
+          "algo_stable",
+          "play_to_earn",
+          "memecoin",
+          "leveraged_collateral"
+        ]
+      }
+    }
+  }
+}

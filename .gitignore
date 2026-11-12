@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# raw API downloads (~200 MB); rebuilt by `python -m tokenlab data`
+data/raw/
