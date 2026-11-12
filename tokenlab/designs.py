@@ -1,10 +1,7 @@
-"""The 12 token designs put through the stress lab.
-
-These are stylised archetypes of designs that exist in the market, not models of any
-specific token. Parameters are set from typical published tokenomics (allocation tables,
-vesting terms, emission schedules) and are deliberately round numbers.
-"""
+"""The 12 token designs. Archetypes with round-number parameters, not specific tokens."""
 from __future__ import annotations
+
+import dataclasses
 
 from .model import Allocation as A
 from .model import TokenDesign
@@ -203,3 +200,24 @@ DESIGNS: list[TokenDesign] = [
 ]
 
 BY_KEY = {d.key: d for d in DESIGNS}
+
+# A 13th design: the algorithmic-stablecoin token reworked one change at a time.
+# Each step keeps the changes before it. Market behaviour (beta, reflexivity) is untouched.
+_algo = BY_KEY["algo_stable"]
+_reserve = dataclasses.replace(_algo, stable_debt=0.0)
+_usage = dataclasses.replace(_reserve, usage_price_elasticity=0.0)
+REDESIGN = dataclasses.replace(
+    _usage, staker_share=0.3,
+    key="reserve_stable",
+    name="Reserve-backed stablecoin governance token",
+    description="The algorithmic-stablecoin design with the stablecoin fully backed by external "
+                "reserves: redemptions are paid from reserves instead of minting tokens, so stablecoin "
+                "demand no longer follows the token price, and 30% of fees go to stakers.",
+)
+REDESIGN_OF = _algo
+REDESIGN_STEPS = [
+    ("As tested (algorithmic stablecoin)", _algo),
+    ("Redemptions paid from reserves, no token minting", _reserve),
+    ("+ stablecoin demand no longer follows the token price", _usage),
+    ("+ 30% of fees paid to stakers (final design)", REDESIGN),
+]

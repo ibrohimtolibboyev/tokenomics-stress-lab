@@ -1,5 +1,4 @@
-"""Stress scenarios. Every scenario shares the same horizon (3 years) and, unless stated,
-applies its shock one year after launch."""
+"""Stress scenarios: 3-year horizon, shock one year after launch."""
 from __future__ import annotations
 
 from .model import Scenario
@@ -47,6 +46,4 @@ SCENARIOS: list[Scenario] = [
 ]
 
 BY_KEY = {s.key: s for s in SCENARIOS}
-# The three market-drawdown scenarios. A design "collapses in crashes" if it collapses in
-# at least one of them; per-scenario results are always reported alongside.
 CRASH_SCENARIOS = ("crash", "crash_at_unlock", "bear")

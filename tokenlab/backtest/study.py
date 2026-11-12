@@ -1,12 +1,5 @@
-"""Event study over the real unlock sample built by tokenlab.backtest.data.
-
-For each event, daily log returns are adjusted for the crypto market using a market model
-against BTC (beta estimated over days [-120, -31], no intercept in the abnormal return, so
-a token's own pre-event drift is not subtracted away). Cumulative abnormal returns (CAR)
-are reported for the run-up, the post-unlock window and the full window.
-
-Run:  python -m tokenlab.backtest.study
-"""
+"""Event study on the unlock sample: abnormal returns vs BTC (market model, beta from
+days -120..-31, no intercept), cumulated over windows around the unlock."""
 from __future__ import annotations
 
 import json
@@ -20,18 +13,18 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
 RESULTS = ROOT / "results"
 
-EST = (-119, -31)          # beta estimation window (return days)
-WINDOWS = {                # return-day ranges, inclusive; day k = ln p[k] / p[k-1]
-    "pre_30": (-29, 0),    # p[-30] -> p[0]
-    "pre_7": (-6, 0),      # p[-7]  -> p[0]
-    "post_7": (1, 7),      # p[0]   -> p[+7]
-    "post_30": (1, 30),    # p[0]   -> p[+30]
-    "full": (-29, 30),     # p[-30] -> p[+30]
+EST = (-119, -31)
+# inclusive return-day ranges; return day k is ln(p[k] / p[k-1])
+WINDOWS = {
+    "pre_30": (-29, 0),
+    "pre_7": (-6, 0),
+    "post_7": (1, 7),
+    "post_30": (1, 30),
+    "full": (-29, 30),
 }
 
 
-def abnormal_returns(panel: pd.DataFrame) -> pd.DataFrame:
-    """Wide frames of abnormal / raw / BTC log returns: index event_id, columns rel_day."""
+def abnormal_returns(panel: pd.DataFrame) -> dict:
     rows = {}
     for eid, g in panel.groupby("event_id"):
         g = g.sort_values("rel_day")
@@ -53,16 +46,16 @@ def _car(x: np.ndarray, k: np.ndarray, win: tuple[int, int]) -> float:
 def _stats(v: np.ndarray, rng: np.random.Generator) -> dict:
     v = np.asarray(v, float)
     n = len(v)
-    simple = np.expm1(v)                      # convert log CAR to simple return
+    simple = np.expm1(v)
     mean, sd = v.mean(), v.std(ddof=1)
     boot = rng.choice(v, size=(10000, n), replace=True).mean(axis=1)
     neg = int((v < 0).sum())
-    # two-sided sign test
     p_sign = min(1.0, 2 * sum(math.comb(n, i) for i in range(max(neg, n - neg), n + 1)) / 2**n)
     return {
         "n": n,
         "mean_log": mean,
-        "mean_pct": float(simple.mean() * 100),
+        "mean_pct": float(np.expm1(mean) * 100),
+        "arith_mean_pct": float(simple.mean() * 100),
         "median_pct": float(np.median(simple) * 100),
         "t_stat": float(mean / (sd / math.sqrt(n))) if sd > 0 else float("nan"),
         "ci95_log": [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))],
@@ -71,7 +64,7 @@ def _stats(v: np.ndarray, rng: np.random.Generator) -> dict:
     }
 
 
-def run(verbose: bool = True) -> dict:
+def run() -> dict:
     events = pd.read_csv(DATA / "unlock_events.csv", parse_dates=["date"])
     panel = pd.read_csv(DATA / "event_prices.csv")
     ar = abnormal_returns(panel)
@@ -80,7 +73,7 @@ def run(verbose: bool = True) -> dict:
     per_event = []
     for _, e in events.iterrows():
         a = ar[e["event_id"]]
-        row = {"event_id": e["event_id"], "date": e["date"].date().isoformat(), "name": e["name"],
+        row = {"event_id": e["event_id"], "date": e["date"].date().isoformat(), "symbol": e["symbol"],
                "category": e["category"], "pct_circ": e["pct_circ"], "usd_value": e["usd_value"],
                "beta": a["beta"]}
         for w, win in WINDOWS.items():
@@ -102,7 +95,6 @@ def run(verbose: bool = True) -> dict:
             "btc_adjusted": _stats(pe[f"btcadj_{w}"].to_numpy(), rng),
         }
 
-    # size split (terciles of unlock size relative to circulating supply)
     pe["size_bucket"] = pd.qcut(pe["pct_circ"], 3, labels=["small", "medium", "large"])
     for b, g in pe.groupby("size_bucket", observed=True):
         summary["splits"][f"size_{b}"] = {
@@ -114,7 +106,6 @@ def run(verbose: bool = True) -> dict:
         if len(g) >= 5:
             summary["splits"][f"recipient_{c}"] = {"full": _stats(g["car_full"].to_numpy(), rng)}
 
-    # cross-sectional regression: CAR_full on ln(1 + unlock size)
     x = np.log1p(pe["pct_circ"].to_numpy())
     y = pe["car_full"].to_numpy()
     X = np.column_stack([np.ones_like(x), x])
@@ -128,7 +119,6 @@ def run(verbose: bool = True) -> dict:
         "r2": float(1 - resid.var() / y.var()),
     }
 
-    # average cumulative abnormal return path, day -30 .. +30 (0 at day -30)
     ks = np.arange(-29, 31)
     paths = np.array([[a["ar"][a["k"] == k][0] for k in ks] for a in (ar[e] for e in pe["event_id"])])
     cum = np.cumsum(paths, axis=1)
@@ -144,13 +134,12 @@ def run(verbose: bool = True) -> dict:
     pe.to_csv(RESULTS / "backtest_events.csv", index=False)
     (RESULTS / "backtest_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    if verbose:
-        print(f"{summary['n_events']} events, {summary['n_tokens']} tokens, "
-              f"{summary['date_min']} .. {summary['date_max']}")
-        for w, s in summary["windows"].items():
-            print(f"  {w:8s} mean {s['mean_pct']:+6.1f}%  median {s['median_pct']:+6.1f}%  "
-                  f"t={s['t_stat']:+.2f}  negative {s['share_negative']:.0%}")
-        print("  size regression:", {k: round(v, 3) for k, v in summary["size_regression"].items() if k != "spec"})
+    print(f"{summary['n_events']} events, {summary['n_tokens']} tokens, "
+          f"{summary['date_min']} .. {summary['date_max']}")
+    for w, s in summary["windows"].items():
+        print(f"  {w:8s} mean {s['mean_pct']:+6.1f}%  median {s['median_pct']:+6.1f}%  "
+              f"t={s['t_stat']:+.2f}  negative {s['share_negative']:.0%}")
+    print("  size regression:", {k: round(v, 3) for k, v in summary["size_regression"].items() if k != "spec"})
     return summary
 
 

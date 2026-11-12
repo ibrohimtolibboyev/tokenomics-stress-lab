@@ -2,56 +2,54 @@
 
 Independent simulations of token supply, unlocks and incentives under shocks.
 
-A Python simulator for token economies, calibrated on real unlock data, used to stress-test
-12 token designs. **Full write-up: [REPORT.md](REPORT.md).**
+A Python simulator for token economies, calibrated on real unlock data and used to stress-test
+12 token designs. Full write-up: [REPORT.md](REPORT.md).
 
 ## Results
 
-- **Backtest of 60 real unlock events.** 60 insider/investor cliff unlocks across 34 tokens
-  (2022-2026, $13.4bn unlocked). From 30 days before to 30 days after the unlock, tokens
-  returned -8.1% on average relative to the market (median -19.0%, t = -3.33); 73% of events
-  were negative. Larger unlocks relative to float did worse (slope t = -3.05).
-- **Stress test of 12 token designs.** 6 scenarios, 4,000 Monte Carlo paths per cell.
-  **7 of 12 designs collapsed in crashes** (fell 90%+ below their pre-crash price in most
-  paths): low-float/high-FDV, vote-escrow emissions DEX, liquidity-mining farm,
-  algorithmic-stablecoin share token, play-to-earn, memecoin, leveraged-collateral governance.
-  The 5 survivors: fair-launch capped supply, revenue buyback-and-burn, proof-of-stake L1,
+- **Backtest of 60 real unlock events.** Insider/investor cliff unlocks across 33 tokens
+  (2022-2026, $14.2bn unlocked). From 30 days before to 30 days after the unlock, tokens
+  returned -16.5% on average relative to the market (median -18.3%, t = -4.11); 77% of events
+  were negative. Larger unlocks relative to circulating supply did worse (slope t = -3.06).
+- **Stress test of 12 token designs.** 6 scenarios, 4,000 Monte Carlo paths each.
+  **7 of 12 designs collapsed in crashes** (fell 90%+ below their pre-crash price in most paths
+  in at least one of three crash scenarios): low-float/high-FDV, vote-escrow DEX, liquidity
+  farm, algorithmic-stablecoin share token, play-to-earn, memecoin, leveraged-collateral
+  governance. Survivors: fair-launch, revenue buyback-and-burn, proof-of-stake L1,
   burn-and-mint, high-APY rebase.
-- **How firm is the 7?** It holds in each of the three crash scenarios at the default
-  settings, but two verdicts are close to the 50% line in the fast crash (liquidity farm 50%,
-  vote-escrow 54%), and the count moves with the assumptions: 2 designs collapse in a 50%
-  crash, 8 in a 70% crash; 8 at an 85% drawdown threshold, 2 at 95%. See the sensitivity
-  tables in the report.
+- **How firm is the 7.** Six collapse in all three crash scenarios. The seventh, the liquidity
+  farm, collapses only in the prolonged bear and at 50.4% of paths, which is a coin-flip. The
+  count also moves with the crash size: 3 designs collapse in a 50% crash, 8 in a 70% crash.
+- **A 13th design.** A reserve-backed rework of the algorithmic-stablecoin token brings its
+  worst-case collapse probability from 61% to 43%.
 
 ![Collapse probability by design and scenario](results/figures/stress_heatmap.png)
 
-## How it works
+## Layout
 
-| Step | Module | What it does |
-|---|---|---|
-| Data | `tokenlab/backtest/data.py` | Pulls vesting schedules (DefiLlama open emissions datasets) and daily prices (DefiLlama coins API); selects the 60 largest qualifying cliff unlocks with a fixed rule |
-| Backtest | `tokenlab/backtest/study.py` | Event study: market-model abnormal returns vs BTC over days -30..+30 |
-| Calibration | `tokenlab/calibrate.py` | Fits the simulator's market-depth parameter so replayed unlocks match the observed average price impact |
-| Simulator | `tokenlab/model.py` | Daily-step Monte Carlo: vesting, emissions, staking, revenue and buybacks, liquidity flight, reflexive mechanisms |
-| Designs | `tokenlab/designs.py` | The 12 archetypes |
-| Shocks | `tokenlab/shocks.py` | Baseline, market crash, crash at the largest unlock, prolonged bear, demand shock, liquidity shock |
-| Stress test | `tokenlab/stress.py` | Design x scenario matrix, collapse verdicts, sensitivity analysis |
-| Report | `tokenlab/report.py` | Figures and `REPORT.md`, generated from `results/` |
+| Module | What it does |
+|---|---|
+| `tokenlab/backtest/data.py` | Builds the unlock sample: DefiLlama vesting schedules and prices, CoinMarketCap circulating supply |
+| `tokenlab/backtest/study.py` | Event study: abnormal returns vs BTC over days -30..+30 |
+| `tokenlab/calibrate.py` | Fits market depth so replayed unlocks match the observed price impact |
+| `tokenlab/model.py` | The simulator |
+| `tokenlab/designs.py` | The 12 designs and the 13th |
+| `tokenlab/shocks.py` | The 6 scenarios |
+| `tokenlab/stress.py` | Design x scenario runs, verdicts, sensitivity |
+| `tokenlab/report.py` | Figures and `REPORT.md` |
 
-## Run it
+## Run
 
 ```bash
 pip install -r requirements.txt
-
-python -m tokenlab all        # backtest -> calibrate -> stress -> report (offline, ~15 min)
-python -m tokenlab data       # optional: rebuild the unlock sample from the APIs (~1 hour)
-python -m pytest              # tests
+python -m tokenlab all     # backtest, calibrate, stress, report (~20 min, offline)
+python -m tokenlab data    # rebuild the unlock sample from the APIs
+python -m pytest
 ```
 
-The curated sample (`data/unlock_events.csv`, `data/event_prices.csv`) is committed, so
-everything except `data` runs offline and reproduces the report exactly (fixed seeds).
+The unlock sample is committed in `data/`, and seeds are fixed, so `all` reproduces the report.
 
-Test your own design:
+Testing your own design:
 
 ```python
 from tokenlab.model import Allocation, TokenDesign, simulate
@@ -73,10 +71,9 @@ print("P(collapse):", (res.max_drawdown() >= 0.9).mean())
 
 ## Caveats
 
-The 12 designs are stylised archetypes with round-number parameters, not models of specific
-tokens, and only market depth is fitted to data; the other behavioural constants are stated
-assumptions. The collapse count is a property of these designs under this model. Unlock
-schedules come from a single provider and may contain errors. Not investment advice.
+The designs are archetypes with round-number parameters, not models of specific tokens. Only
+market depth is fitted to data; beta, reflexivity and the other behavioural constants are
+assumptions, and the report shows the verdicts are sensitive to them. Not investment advice.
 
 ## License
 

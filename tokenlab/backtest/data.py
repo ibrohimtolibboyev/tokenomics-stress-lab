@@ -1,30 +1,20 @@
-"""Build the real-world unlock event sample used by the backtest.
+"""Build the unlock event sample.
 
-Sources (both public, no API key):
-  * DefiLlama open emissions datasets  - vesting schedules and cliff unlock events
-      https://defillama-datasets.llama.fi/emissionsIndex
-      https://defillama-datasets.llama.fi/emissions/<protocol-slug>
-  * DefiLlama coins API                - daily token prices (keyed by CoinGecko id)
-      https://coins.llama.fi/chart/coingecko:<id>
+Vesting schedules and daily prices come from DefiLlama, circulating supply from
+CoinMarketCap's historical quotes (market cap / price).
 
-Selection rule (fixed before looking at any returns):
-  1. Cliff unlocks to insiders (team / advisors) or private-sale investors.
-  2. Event date between START_DATE and END_DATE.
-  3. Unlock size between MIN_PCT_CIRC and MAX_PCT_CIRC of the circulating supply on the
-     day before. (An "unlock" larger than the whole float means the schedule's float
-     figure is incomplete or the event is effectively a launch; both are excluded.)
-  4. Not a token-generation event: >= MIN_HISTORY_DAYS of prior price history.
-  5. Complete daily prices for the token and for BTC over [-120, +30] days.
-  6. Events of the same token must be >= MIN_GAP_DAYS apart (largest kept first),
-     and at most MAX_PER_TOKEN events per token.
-  7. Keep the N_EVENTS largest remaining events by USD value at the unlock date.
-
-Run:  python -m tokenlab.backtest.data
+Selection:
+  1. cliff unlocks to insiders or private-sale investors, START_DATE..END_DATE
+  2. unlock is 1%-100% of circulating supply just before the event
+  3. daily prices for the token and BTC over [-120, +30] days
+  4. same-token events at least 61 days apart, at most 3 per token
+  5. the 60 largest by USD value
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import time
 from pathlib import Path
 
@@ -37,52 +27,50 @@ RAW = DATA / "raw"
 
 HEADERS = {"User-Agent": "tokenomics-stress-lab"}
 INDEX_URL = "https://defillama-datasets.llama.fi/emissionsIndex"
-PROTOCOL_URL = "https://defillama-datasets.llama.fi/emissions/{slug}"
 PRICE_URL = "https://coins.llama.fi/chart/coingecko:{gid}?start={start}&span={span}&period=1d"
+CMC = "https://api.coinmarketcap.com/data-api/v3"
+CMC_MAP_URL = CMC + "/map/all?listing_status=active,inactive,untracked&start={start}&limit=9999"
+CMC_HIST_URL = CMC + "/cryptocurrency/historical?id={cid}&convertId=2781&timeStart={a}&timeEnd={b}"
 
 START_DATE = dt.date(2022, 1, 1)
 END_DATE = dt.date(2026, 9, 30)
+SUPPLY_FROM = dt.date(2021, 12, 1)
+SUPPLY_TO = dt.date(2026, 11, 1)
 INSIDER_CATEGORIES = {"insiders", "privateSale"}
 MIN_PCT_CIRC = 0.01
 MAX_PCT_CIRC = 1.0
-MIN_HISTORY_DAYS = 120
 PRE_DAYS = 120
 POST_DAYS = 30
 MIN_GAP_DAYS = 61
 MAX_PER_TOKEN = 3
 N_EVENTS = 60
 MIN_PRICE_CONFIDENCE = 0.9
-# Tokens dropped for data-integrity reasons (documented, not return-based):
-EXCLUDED_SLUGS = {
-    # schedule is denominated in the post-redenomination token while the price series is
-    # the old token, so token counts and USD values do not match
-    "omni-network",
-}
-# stablecoins / wrapped assets are not meaningful for an unlock study
+MAX_SUPPLY_AGE = 7      # days between the supply quote and the unlock
+PRICE_TOLERANCE = 0.15  # max log gap between the CoinMarketCap and DefiLlama price
+# schedule is in post-redenomination tokens, price series is the old token
+EXCLUDED_SLUGS = {"omni-network"}
 EXCLUDED_GECKO_IDS = {"bitcoin", "ethereum", "tether", "usd-coin"}
-
-DAY = 86400
 
 
 def _get(url: str, cache: Path, tries: int = 4):
-    """GET JSON with an on-disk cache and simple retry."""
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))
-    last = None
+    err = None
     for i in range(tries):
         try:
             r = requests.get(url, headers=HEADERS, timeout=120)
             if r.status_code == 200:
                 cache.parent.mkdir(parents=True, exist_ok=True)
                 cache.write_text(r.text, encoding="utf-8")
+                time.sleep(0.3)
                 return r.json()
-            last = f"HTTP {r.status_code}"
+            err = f"HTTP {r.status_code}"
             if r.status_code in (400, 403, 404):
                 break
-        except requests.RequestException as e:  # network hiccup: retry
-            last = repr(e)
+        except requests.RequestException as e:
+            err = repr(e)
         time.sleep(2 * (i + 1))
-    raise RuntimeError(f"failed to fetch {url}: {last}")
+    raise RuntimeError(f"failed to fetch {url}: {err}")
 
 
 def _date(ts: float) -> dt.date:
@@ -94,161 +82,170 @@ def _midnight(d: dt.date) -> int:
 
 
 def candidate_events(index: dict) -> pd.DataFrame:
-    """All insider/investor cliff unlocks in the date window, one row per token-day."""
+    """Insider/investor cliff unlocks in the date window, one row per token-day."""
     rows = []
     for p in index["data"]:
         gid = p.get("gecko_id")
         if not gid or gid in EXCLUDED_GECKO_IDS or p.get("protocolSlug") in EXCLUDED_SLUGS:
             continue
-        per_day: dict[dt.date, dict] = {}
+        days: dict[dt.date, dict] = {}
         for ev in p.get("unlockEvents") or []:
             d = _date(ev["timestamp"])
-            if not (START_DATE <= d <= END_DATE):
+            if not START_DATE <= d <= END_DATE:
                 continue
             for a in ev.get("cliffAllocations") or []:
                 if a.get("category") not in INSIDER_CATEGORIES or not a.get("amount"):
                     continue
-                slot = per_day.setdefault(d, {"tokens": 0.0, "recipients": set(), "cats": set()})
-                slot["tokens"] += float(a["amount"])
-                slot["recipients"].add(str(a.get("recipient")))
-                slot["cats"].add(a["category"])
-        for d, s in per_day.items():
-            rows.append(
-                {
-                    "slug": p["protocolSlug"],
-                    "name": p["name"],
-                    "gecko_id": gid,
-                    "date": d,
-                    "tokens_unlocked": s["tokens"],
-                    "recipients": "; ".join(sorted(s["recipients"])),
-                    "category": "+".join(sorted(s["cats"])),
-                    "max_supply": p.get("maxSupply"),
-                }
-            )
+                s = days.setdefault(d, {"tokens": 0.0, "recipients": set(), "cats": set()})
+                s["tokens"] += float(a["amount"])
+                s["recipients"].add(str(a.get("recipient")))
+                s["cats"].add(a["category"])
+        for d, s in days.items():
+            rows.append({"slug": p["protocolSlug"], "gecko_id": gid, "date": d,
+                         "tokens_unlocked": s["tokens"],
+                         "recipients": "; ".join(sorted(s["recipients"])),
+                         "category": "+".join(sorted(s["cats"]))})
     return pd.DataFrame(rows)
 
 
-def circulating_before(proto: dict, d: dt.date) -> float:
-    """Unlocked supply (excluding non-circulating buckets) on the day before `d`."""
-    nonc = set((proto.get("categories") or {}).get("noncirculating") or [])
-    cutoff = _midnight(d)
-    total = 0.0
-    for series in proto["documentedData"]["data"]:
-        if series["label"] in nonc:
+def cmc_map() -> list[dict]:
+    coins, start = [], 1
+    while True:
+        js = _get(CMC_MAP_URL.format(start=start), RAW / "cmc" / f"map_{start}.json")
+        page = js["data"]["cryptoCurrencyMap"]
+        coins += page
+        if len(page) < 9999:
+            return coins
+        start += 9999
+
+
+def cmc_supply(cid: int) -> pd.DataFrame:
+    """Close price and circulating supply (market cap / price), indexed by date."""
+    url = CMC_HIST_URL.format(cid=cid, a=_midnight(SUPPLY_FROM), b=_midnight(SUPPLY_TO))
+    js = _get(url, RAW / "cmc" / f"{cid}.json")
+    rows = {}
+    for q in (js.get("data") or {}).get("quotes") or []:
+        v = q["quote"]
+        if v.get("close") and v.get("marketCap"):
+            rows[dt.date.fromisoformat(q["timeClose"][:10])] = (v["close"], v["marketCap"] / v["close"])
+    return pd.DataFrame.from_dict(rows, orient="index", columns=["close", "circ"]).sort_index()
+
+
+def cmc_candidates(p: dict, coins: list[dict]) -> list[tuple[dict, pd.DataFrame]]:
+    """CoinMarketCap listings that share the entry's slug, name or ticker, best guess first.
+    The right one is picked later by comparing prices."""
+    sym = ((p.get("tokenPrice") or [{}])[0].get("symbol") or "").upper()
+    gid, name = p["gecko_id"], p["name"].lower()
+    cands = [c for c in coins
+             if c["slug"] == gid or c["name"].lower() == name or (sym and c["symbol"].upper() == sym)]
+    cands.sort(key=lambda c: (c["slug"] != gid, c.get("rank") or 10**9))
+    out = []
+    for c in cands[:5]:
+        try:
+            sup = cmc_supply(c["id"])
+        except RuntimeError:
             continue
-        last = 0.0
-        for pt in series["data"]:
-            if pt["timestamp"] >= cutoff:
-                break
-            last = pt.get("unlocked") or 0.0
-        total += last
-    return total
+        if not sup.empty:
+            out.append((c, sup))
+    return out
 
 
 def fetch_prices(gid: str, start: dt.date, end: dt.date) -> pd.Series:
-    """Daily prices sampled at 00:00 UTC, indexed by date."""
+    """Daily prices at 00:00 UTC, indexed by date."""
     span = (end - start).days + 1
-    cache = RAW / "prices" / f"{gid}_{start}_{end}.json"
-    js = _get(PRICE_URL.format(gid=gid, start=_midnight(start), span=span), cache)
+    js = _get(PRICE_URL.format(gid=gid, start=_midnight(start), span=span),
+              RAW / "prices" / f"{gid}_{start}_{end}.json")
     coin = js.get("coins", {}).get(f"coingecko:{gid}")
     if not coin or coin.get("confidence", 0) < MIN_PRICE_CONFIDENCE:
         return pd.Series(dtype=float)
-    s = {}
+    out = {}
     for pt in coin["prices"]:
-        # keep only points sampled close to midnight (API returns nearest observation)
         d = _date(pt["timestamp"] + 6 * 3600)
         if abs(pt["timestamp"] - _midnight(d)) <= 6 * 3600 and pt["price"] > 0:
-            s.setdefault(d, float(pt["price"]))
-    return pd.Series(s).sort_index()
+            out.setdefault(d, float(pt["price"]))
+    return pd.Series(out).sort_index()
 
 
 def _window_ok(px: pd.Series, d: dt.date) -> bool:
     need = [d + dt.timedelta(days=k) for k in range(-PRE_DAYS, POST_DAYS + 1)]
-    have = sum(1 for x in need if x in px.index)
-    # tolerate a few missing days (filled forward later) but both endpoints must exist
+    have = sum(x in px.index for x in need)
     return have >= len(need) - 3 and need[0] in px.index and d in px.index and need[-1] in px.index
 
 
-def build(verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
-    DATA.mkdir(exist_ok=True)
+def build() -> tuple[pd.DataFrame, pd.DataFrame]:
     index = _get(INDEX_URL, RAW / "emissionsIndex.json")
     cand = candidate_events(index)
-    if verbose:
-        print(f"candidate insider cliff unlock days: {len(cand)} across {cand.slug.nunique()} tokens")
+    print(f"candidates: {len(cand)} unlock days, {cand.slug.nunique()} tokens")
 
-    # --- size relative to circulating supply ---------------------------------
-    keep = []
+    protocols = {p["protocolSlug"]: p for p in index["data"] if p.get("protocolSlug")}
+    coins = cmc_map()
+    sized, no_supply = [], []
     for slug, grp in cand.groupby("slug"):
-        try:
-            proto = _get(PROTOCOL_URL.format(slug=slug), RAW / "emissions" / f"{slug}.json")
-        except RuntimeError:
+        listings = cmc_candidates(protocols[slug], coins)
+        if not listings:
+            no_supply.append(slug)
             continue
-        for _, r in grp.iterrows():
-            circ = circulating_before(proto, r["date"])
-            if circ <= 0:
-                continue
-            pct = r["tokens_unlocked"] / circ
-            if MIN_PCT_CIRC <= pct <= MAX_PCT_CIRC:
-                keep.append({**r.to_dict(), "circ_before": circ, "pct_circ": pct})
-    ev = pd.DataFrame(keep)
-    if verbose:
-        print(f"events {MIN_PCT_CIRC:.0%}-{MAX_PCT_CIRC:.0%} of circulating supply: {len(ev)} across {ev.slug.nunique()} tokens")
+        for r in grp.to_dict("records"):
+            options = []
+            for coin, sup in listings:
+                before = sup[sup.index < r["date"]]
+                if before.empty or (r["date"] - before.index[-1]).days > MAX_SUPPLY_AGE:
+                    continue
+                circ = before["circ"].iloc[-1]
+                if MIN_PCT_CIRC <= r["tokens_unlocked"] / circ <= MAX_PCT_CIRC:
+                    options.append({"name": coin["name"], "symbol": coin["symbol"], "cmc_id": coin["id"],
+                                    "circ_before": circ, "pct_circ": r["tokens_unlocked"] / circ,
+                                    "supply_date": before.index[-1], "cmc_close": before["close"].iloc[-1]})
+            if options:
+                sized.append({**r, "options": options})
+    print(f"no CoinMarketCap supply history: {len(no_supply)} tokens: {', '.join(no_supply)}")
+    print(f"{MIN_PCT_CIRC:.0%}-{MAX_PCT_CIRC:.0%} of circulating: {len(sized)} events")
 
-    # --- prices --------------------------------------------------------------
-    btc_start = START_DATE - dt.timedelta(days=PRE_DAYS + 5)
-    btc_end = END_DATE + dt.timedelta(days=POST_DAYS + 5)
-    btc = pd.concat(
-        [
-            fetch_prices("bitcoin", a, min(a + dt.timedelta(days=399), btc_end))
-            for a in (btc_start + dt.timedelta(days=400 * i) for i in range(((btc_end - btc_start).days // 400) + 1))
-        ]
-    )
+    btc_a = START_DATE - dt.timedelta(days=PRE_DAYS + 5)
+    btc_b = END_DATE + dt.timedelta(days=POST_DAYS + 5)
+    chunks = [btc_a + dt.timedelta(days=400 * i) for i in range((btc_b - btc_a).days // 400 + 1)]
+    btc = pd.concat([fetch_prices("bitcoin", a, min(a + dt.timedelta(days=399), btc_b)) for a in chunks])
     btc = btc[~btc.index.duplicated()].sort_index()
 
-    priced = []
-    price_rows = []
-    for _, r in ev.iterrows():
+    priced, series, mismatched = [], {}, []
+    for r in sized:
         d = r["date"]
-        a = d - dt.timedelta(days=PRE_DAYS + MIN_HISTORY_DAYS - PRE_DAYS + 2)
-        b = d + dt.timedelta(days=POST_DAYS + 1)
         try:
-            px = fetch_prices(r["gecko_id"], a, b)
+            px = fetch_prices(r["gecko_id"], d - dt.timedelta(days=PRE_DAYS + 2), d + dt.timedelta(days=POST_DAYS + 1))
         except RuntimeError:
             continue
         if px.empty or not _window_ok(px, d) or not _window_ok(btc, d):
             continue
-        p0 = px[d]
-        priced.append({**r.to_dict(), "price_at_unlock": p0, "usd_value": p0 * r["tokens_unlocked"],
-                       "mcap_before": p0 * r["circ_before"]})
-        price_rows.append((r["slug"], d, px))
-    ev = pd.DataFrame(priced)
-    if verbose:
-        print(f"events with complete price windows: {len(ev)} across {ev.slug.nunique()} tokens")
-
-    # --- de-overlap within token, cap per token, take the largest ------------
-    ev = ev.sort_values("usd_value", ascending=False).reset_index(drop=True)
-    chosen: list[int] = []
-    per_token: dict[str, list[dt.date]] = {}
-    for i, r in ev.iterrows():
-        dates = per_token.setdefault(r["slug"], [])
-        if len(dates) >= MAX_PER_TOKEN:
+        # the CoinMarketCap close is the end of supply_date, DefiLlama samples at 00:00
+        match = next((o for o in r.pop("options")
+                      if (ref := px.get(o["supply_date"] + dt.timedelta(days=1)))
+                      and abs(math.log(ref / o["cmc_close"])) <= PRICE_TOLERANCE), None)
+        if match is None:
+            mismatched.append(f"{r['slug']} {d}")
             continue
-        if any(abs((r["date"] - x).days) < MIN_GAP_DAYS for x in dates):
+        priced.append({**r, **match, "price_at_unlock": px[d], "usd_value": px[d] * r["tokens_unlocked"],
+                       "mcap_before": px[d] * match["circ_before"]})
+        series[(r["slug"], d)] = px
+    print(f"price mismatch between sources, dropped: {len(mismatched)}: {', '.join(mismatched)}")
+    ev = pd.DataFrame(priced).sort_values("usd_value", ascending=False).reset_index(drop=True)
+    print(f"with complete prices: {len(ev)} events, {ev.slug.nunique()} tokens")
+
+    chosen, taken = [], {}
+    for i, r in ev.iterrows():
+        dates = taken.setdefault(r["slug"], [])
+        if len(dates) >= MAX_PER_TOKEN or any(abs((r["date"] - x).days) < MIN_GAP_DAYS for x in dates):
             continue
         dates.append(r["date"])
         chosen.append(i)
         if len(chosen) == N_EVENTS:
             break
-    sel = ev.loc[chosen].sort_values("date").reset_index(drop=True)
+    sel = ev.loc[chosen].sort_values(["date", "slug"]).reset_index(drop=True)
     sel.insert(0, "event_id", [f"E{i + 1:02d}" for i in range(len(sel))])
-    if verbose:
-        print(f"selected: {len(sel)} events across {sel.slug.nunique()} tokens")
+    print(f"selected: {len(sel)} events, {sel.slug.nunique()} tokens")
 
-    # --- tidy price panel for the selected events ----------------------------
-    lookup = {(s, d): px for s, d, px in price_rows}
     panel = []
-    for _, r in sel.iterrows():
-        px = lookup[(r["slug"], r["date"])]
+    for r in sel.to_dict("records"):
+        px = series[(r["slug"], r["date"])]
         for k in range(-PRE_DAYS, POST_DAYS + 1):
             day = r["date"] + dt.timedelta(days=k)
             panel.append({"event_id": r["event_id"], "rel_day": k, "date": day,
@@ -256,8 +253,9 @@ def build(verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
     panel = pd.DataFrame(panel)
     panel[["price", "btc"]] = panel.groupby("event_id")[["price", "btc"]].ffill()
 
-    cols = ["event_id", "date", "name", "slug", "gecko_id", "category", "recipients", "tokens_unlocked",
-            "circ_before", "pct_circ", "price_at_unlock", "usd_value", "mcap_before"]
+    cols = ["event_id", "date", "symbol", "name", "slug", "gecko_id", "cmc_id", "category", "recipients",
+            "tokens_unlocked", "circ_before", "pct_circ", "price_at_unlock", "usd_value", "mcap_before"]
+    DATA.mkdir(exist_ok=True)
     sel[cols].to_csv(DATA / "unlock_events.csv", index=False)
     panel.to_csv(DATA / "event_prices.csv", index=False)
     return sel[cols], panel
@@ -266,4 +264,4 @@ def build(verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
 if __name__ == "__main__":
     events, _ = build()
     pd.set_option("display.width", 200)
-    print(events[["event_id", "date", "name", "category", "pct_circ", "usd_value"]].to_string(index=False))
+    print(events[["event_id", "date", "symbol", "category", "pct_circ", "usd_value"]].to_string(index=False))

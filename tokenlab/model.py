@@ -1,26 +1,13 @@
-"""Core token-economy simulator.
+"""Daily-step Monte Carlo simulator for a token economy.
 
-A token design is described by a `TokenDesign` (supply allocations, vesting, emissions,
-staking, value capture, liquidity and optional reflexive mechanisms). `simulate` runs a
-daily-step Monte Carlo of that design under a `Scenario` (market path + shocks).
+Log price each day:
 
-Price formation (log price, per day):
+    dlnP = beta * market return + noise
+         + FAIR_SPEED * (ln F - ln P)      F ~ market^beta * adoption / circ^DILUTION
+         + momentum feedback + value support
+         + (usd bought / P - tokens sold) / (depth * circ)
 
-    dlnP =  beta * r_market + idiosyncratic noise
-          + k * (ln F - ln P)            (reversion to the network's fair value F, where
-                                          F ~ market^beta * adoption / circulating^dilution)
-          + momentum feedback            (trend-following / panic flows)
-          + value support                (buyers stepping in below cash-flow value)
-          - tokens_sold / (depth * circ) (unlock sales, emission dumping, redemptions,
-                                          liquidations, unstaking, treasury sales)
-          + usd_bought / (depth * mcap)  (buybacks, utility purchases)
-
-`depth` is the market-depth parameter: selling x% of circulating supply moves the price
-by roughly x / depth percent. It is calibrated against real unlock events (see
-tokenlab/calibrate.py).
-
-All token quantities are expressed as a share of the initial total supply (= 1.0) and the
-initial price is 1.0, so "market cap" is in units of initial fully-diluted value.
+Token amounts are shares of initial total supply and the launch price is 1.
 """
 from __future__ import annotations
 
@@ -28,10 +15,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-# --------------------------------------------------------------------------------------
-# Global behavioural constants (shared by every design; see REPORT.md, "Calibration")
-# --------------------------------------------------------------------------------------
-DEPTH = 0.50            # market depth; overwritten by calibration result if present
+DEPTH = 0.50            # selling x% of float moves price ~x/DEPTH %; fitted in calibrate.py
 HEDGE_FRAC = 0.5        # share of a cliff's expected sales that is pre-hedged (shorted)
 HEDGE_DAYS = 30         # ... over this many days before the cliff
 SELL_DAYS = 20          # e-folding time of post-unlock selling
@@ -90,7 +74,7 @@ class TokenDesign:
     description: str
     allocations: list[Allocation]
 
-    # --- market behaviour ---
+    # market behaviour
     beta: float = 1.2                 # sensitivity to the crypto market factor
     idio_vol: float = 0.6             # annualised idiosyncratic volatility
     reflexivity: float = 0.25         # share of the trailing-month return (beyond a dead band) that feeds back
@@ -98,7 +82,7 @@ class TokenDesign:
     pol_share: float = 0.2            # share of liquidity that never leaves (protocol-owned)
     liq_flight: float = 0.8           # how fast non-POL liquidity leaves in a drawdown
 
-    # --- emissions (new supply) ---
+    # emissions (new supply)
     emission_rate: float = 0.0        # initial annual emissions, share of total supply
     emission_halflife: float = 0.0    # days; 0 = constant
     emission_cap: float = 1e9         # max cumulative emissions (share of total supply)
@@ -106,14 +90,14 @@ class TokenDesign:
     emission_usd_target: float = 0.0  # 0..1: emissions scale up as price falls (USD-pegged rewards)
     emission_to_lp: float = 0.0       # share of emissions paying for liquidity (mercenary depth)
 
-    # --- staking / locking ---
+    # staking / locking
     stake_share: float = 0.0          # initial share of circulating supply staked/locked
     unbond_days: int = 14             # delay between exit decision and tokens being liquid
     exit_base: float = 0.0005         # baseline daily exit rate of staked tokens
     exit_sens: float = 0.01           # extra daily exit rate per unit drawdown beyond 25%
     exit_sell_frac: float = 0.7       # share of exited tokens that is sold
 
-    # --- usage, revenue and value capture ---
+    # usage, revenue and value capture
     revenue_yield: float = 0.0        # annual protocol revenue / initial circulating mcap
     usage_growth: float = 0.2         # annual organic growth of adoption
     usage_beta: float = 0.6           # sensitivity of fee revenue to market returns
@@ -124,16 +108,16 @@ class TokenDesign:
     burn_mint_share: float = 0.0      # share of revenue users must pay by buying+burning tokens
     backing: float = 0.0              # hard treasury backing per token / initial price (redeemable floor)
 
-    # --- treasury ---
+    # treasury
     opex: float = 0.0                 # annual USD operating cost / initial circulating mcap
     treasury_stables: float = 0.0     # USD reserves / initial circulating mcap
 
-    # --- reflexive mechanisms ---
+    # reflexive mechanisms
     stable_debt: float = 0.0          # algorithmic-stablecoin supply / initial circulating mcap
     run_threshold: float = 1.25       # run starts when token mcap / stablecoin supply falls below this
     run_sens: float = 0.10            # daily redemption rate as coverage goes from threshold to zero
     liquidation_bands: list[tuple[float, float]] = field(default_factory=list)
-    # ^ (drawdown level, share of circulating supply force-sold when breached)
+    # (drawdown level, share of circulating supply force-sold)
 
     def unlocks(self, horizon: int) -> dict[str, np.ndarray]:
         out: dict[str, np.ndarray] = {}
@@ -201,7 +185,7 @@ def _sell_schedule(design: TokenDesign, horizon: int) -> tuple[np.ndarray, np.nd
             continue
         u = u.copy()
         u[0] = 0.0  # launch float is the starting state, not a sale
-        # cliffs = lumps much larger than the cohort's typical daily unlock
+        # a cliff is a lump much larger than the cohort's usual daily unlock
         typical = np.median(u[u > 0]) if (u > 0).any() else 0.0
         is_cliff = u > max(10 * typical, 0.002)
         if (u > 0).sum() <= 3:
@@ -260,8 +244,7 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
     design.validate()
     T = scenario.horizon
     rng = np.random.default_rng(seed)
-    base_depth = (DEPTH if depth is None else depth)
-    d0 = base_depth * design.depth_mult
+    d0 = (DEPTH if depth is None else depth) * design.depth_mult
 
     shock_day = scenario.shock_day
     if scenario.align_to_unlock:
@@ -271,7 +254,7 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
 
     unlock_circ, unlock_treas, sched_sales = _sell_schedule(design, T)
 
-    # ---- exogenous market path ------------------------------------------------------
+    # exogenous market path
     dt = 1 / 365
     vol = np.full(T, scenario.market_vol)
     if scenario.market_drop > 0:
@@ -290,7 +273,7 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
     if scenario.liquidity_mult != 1.0:
         liq_shock[shock_day:shock_day + scenario.liquidity_days] = scenario.liquidity_mult
 
-    # ---- state ------------------------------------------------------------------------
+    # state
     C0 = unlock_circ[0]
     if C0 <= 0:
         raise ValueError(f"{design.key}: no circulating supply at launch")
@@ -306,7 +289,6 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
     debt = np.full(paths, design.stable_debt * C0)
     emitted = np.zeros(paths)
     bands_hit = np.zeros((paths, len(design.liquidation_bands)), dtype=bool)
-    prev_dln = np.zeros(paths)
 
     rev0 = design.revenue_yield * C0 / 365          # USD per day at launch
     opex = design.opex * C0 / 365
@@ -327,8 +309,8 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
         mom = dln_h[:, max(0, t - MOM_WINDOW):t].sum(axis=1) if t > 0 else np.zeros(paths)
         mom = np.sign(mom) * np.maximum(np.abs(mom) - MOM_DEADBAND, 0.0)
 
-        # ---- usage and revenue -------------------------------------------------------
-        # price-dependent adoption follows sustained price moves, and returns slower than it leaves
+        # usage and revenue
+        # price-driven adoption comes back slower than it leaves
         chase = np.where(mom < 0, mom, ADOPTION_RECOVERY * mom) / MOM_WINDOW
         lnA = lnA + (design.usage_growth * dt + demand[t]
                      + design.usage_price_elasticity * chase + design.usage_vol * np.sqrt(dt) * z_u[:, t])
@@ -336,7 +318,7 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
         U = np.exp(np.clip(lnA + design.usage_beta * lnM, -40, 40))
         rev = rev0 * U
 
-        # ---- supply: unlocks and emissions ------------------------------------------
+        # supply: unlocks and emissions
         if t > 0:
             C = C + unlock_circ[t]
             treas_tok = treas_tok + unlock_treas[t]
@@ -352,11 +334,10 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
             emitted += em
             C = C + em
             sells += em * design.emission_sell_frac
-            # unsold staking rewards auto-compound into the staked balance
             if design.stake_share > 0:
                 S = S + em * (1 - design.emission_sell_frac) * (1 - design.emission_to_lp)
 
-        # ---- staking exits -------------------------------------------------------------
+        # staking exits
         if design.stake_share > 0:
             exit_rate = np.minimum(design.exit_base + design.exit_sens * np.maximum(dd - 0.25, 0), 0.25)
             leaving = S * exit_rate
@@ -366,10 +347,9 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
             if design.unbond_days > 0:
                 unbond[:, slot] = leaving
             sells += matured * design.exit_sell_frac
-            # healthy conditions: a small share of float is re-staked
             S = S + 0.001 * np.maximum(design.stake_share * C - S, 0) * (dd < 0.25)
 
-        # ---- algorithmic stablecoin run --------------------------------------------
+        # algorithmic stablecoin run
         if design.stable_debt > 0:
             coverage = C * P / np.maximum(debt, 1e-12)
             run = design.run_sens * np.clip(1 - coverage / design.run_threshold, 0, 1)
@@ -379,13 +359,13 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
             C = C + minted
             sells += minted
 
-        # ---- collateral liquidations ---------------------------------------------------
+        # collateral liquidations
         for j, (level, share) in enumerate(design.liquidation_bands):
             fire = (dd >= level) & ~bands_hit[:, j]
             bands_hit[:, j] |= fire
             sells += fire * share * C
 
-        # ---- treasury: fund the operating deficit ----------------------------------
+        # treasury: fund the operating deficit
         buys_usd = rev * (design.buyback_share + design.burn_mint_share)
         retained = rev * max(0.0, 1 - design.buyback_share - design.burn_mint_share - design.staker_share)
         deficit = np.maximum(opex - retained, 0.0)
@@ -397,7 +377,7 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
         C = C + need_tok
         sells += need_tok
 
-        # ---- liquidity ---------------------------------------------------------------
+        # liquidity
         flight = np.maximum(1 - design.liq_flight * dd, 0.25)
         lam = d0 * liq_shock[t] * (design.pol_share + (1 - design.pol_share) * flight)
         if inc0 > 0:
@@ -405,12 +385,12 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
             lam = lam * np.clip((inc / inc0) ** 0.5, 0.5, 1.5)
         lam = np.maximum(lam, 0.02)
 
-        # ---- fundamental value -----------------------------------------------------
+        # fundamental value
         capture = design.buyback_share + design.staker_share + design.burn_mint_share
         V = (rev * 365 * capture * VALUE_MULTIPLE) / C + design.backing
         support = VALUE_SPEED * np.clip(np.log(np.maximum(V, 1e-12) / P), 0, 3)
 
-        # ---- price update ----------------------------------------------------------
+        # price update
         flow = (buys_usd / P - sells) / C
         news = design.idio_vol * np.sqrt(dt) * z_i[:, t]
         lnN = lnN + news
@@ -422,14 +402,12 @@ def simulate(design: TokenDesign, scenario: Scenario, paths: int = 400, seed: in
         if t == 0:
             dln = np.zeros(paths)
 
-        # burns from buybacks / burn-and-mint
         C = np.maximum(C - buys_usd / P, 1e-9)
         S = np.minimum(S, C)
 
         price[:, t] = P; supply[:, t] = C; depth_h[:, t] = lam; usage[:, t] = U
         staked_h[:, t] = S; treas_h[:, t] = treas_usd; sold_h[:, t] = sells
         dln_h[:, t] = dln
-        prev_dln = dln
         lnP = lnP + dln
 
     return SimResult(design, scenario, shock_day, price, supply, depth_h, usage, market,

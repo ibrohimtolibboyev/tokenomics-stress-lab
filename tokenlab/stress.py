@@ -1,15 +1,7 @@
-"""Stress-test runner: every design under every scenario, plus sensitivity analysis.
+"""Run every design under every scenario.
 
-Collapse definition (fixed in advance, applied identically to every design):
-
-    A simulated path COLLAPSES if, at any point after the shock, the token trades at least
-    90% below its pre-shock price.  A design COLLAPSES in a scenario if more than half of
-    its Monte Carlo paths collapse.
-
-A stricter "no recovery" variant (collapsed AND still below 25% of the pre-shock price at
-the end of the horizon) is reported alongside.
-
-Run:  python -m tokenlab.stress
+A path collapses if the token trades 90% or more below its pre-shock price at any point
+after the shock. A design collapses in a scenario if more than half of its paths do.
 """
 from __future__ import annotations
 
@@ -21,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import model
-from .designs import DESIGNS
+from .designs import DESIGNS, REDESIGN, REDESIGN_STEPS
 from .shocks import BY_KEY as SCENARIO_BY_KEY
 from .shocks import CRASH_SCENARIOS, SCENARIOS
 
@@ -32,7 +24,7 @@ COLLAPSE_DRAWDOWN = 0.90
 NO_RECOVERY_LEVEL = 0.25
 MAJORITY = 0.5
 PATHS = 4000
-BORDERLINE = 0.05       # |P(collapse) - 50%| below this is flagged as a close call
+BORDERLINE = 0.05   # P(collapse) within 5 points of 50% is a close call
 SEED = 2026
 
 
@@ -68,22 +60,20 @@ def metrics(res: model.SimResult, drawdown: float = COLLAPSE_DRAWDOWN) -> dict:
     }
 
 
-def run_matrix(paths: int = PATHS, seed: int = SEED, depth: float | None = None,
-               keep_paths: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
-    depth = calibrated_depth() if depth is None else depth
+def run_matrix(designs=DESIGNS, paths: int = PATHS, seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
+    depth = calibrated_depth()
     rows, curves = [], []
-    for d in DESIGNS:
+    for d in designs:
         for s in SCENARIOS:
             res = model.simulate(d, s, paths=paths, seed=seed, depth=depth)
             rows.append({"design": d.key, "design_name": d.name, "scenario": s.key,
                          "scenario_name": s.name, **metrics(res)})
-            if keep_paths:
-                rel = res.price / res.pre_shock_price()[:, None]
-                days = np.arange(0, s.horizon, 5)
-                q = np.percentile(rel[:, days], [10, 50, 90], axis=0)
-                for i, day in enumerate(days):
-                    curves.append({"design": d.key, "scenario": s.key, "day": int(day) - res.shock_day,
-                                   "p10": q[0, i], "median": q[1, i], "p90": q[2, i]})
+            rel = res.price / res.pre_shock_price()[:, None]
+            days = np.arange(0, s.horizon, 5)
+            q = np.percentile(rel[:, days], [10, 50, 90], axis=0)
+            for i, day in enumerate(days):
+                curves.append({"design": d.key, "scenario": s.key, "day": int(day) - res.shock_day,
+                               "p10": q[0, i], "median": q[1, i], "p90": q[2, i]})
     return pd.DataFrame(rows), pd.DataFrame(curves)
 
 
@@ -94,7 +84,7 @@ def count_collapsed(df: pd.DataFrame, scenarios=CRASH_SCENARIOS) -> tuple[int, l
 
 
 def sensitivity(paths: int = 2000, seed: int = SEED) -> dict:
-    """How the headline count moves with crash severity, collapse threshold, depth and seed."""
+    """Collapse count in the fast crash as crash size, threshold, depth and seed change."""
     depth = calibrated_depth()
     crash = SCENARIO_BY_KEY["crash"]
     out: dict = {"paths": paths}
@@ -121,11 +111,29 @@ def sensitivity(paths: int = 2000, seed: int = SEED) -> dict:
     return out
 
 
-def run(verbose: bool = True) -> dict:
+def p_collapse(design, scenario_key: str, paths: int, seed: int = SEED) -> float:
+    res = model.simulate(design, SCENARIO_BY_KEY[scenario_key], paths=paths, seed=seed, depth=calibrated_depth())
+    return float((res.max_drawdown() >= COLLAPSE_DRAWDOWN).mean())
+
+
+def behaviour_check(keys: list[str], paths: int = 2000) -> dict:
+    """P(collapse) in the fast crash with beta, reflexivity and price-led usage set to the
+    values the surviving designs use, everything else unchanged."""
+    out = {}
+    for d in DESIGNS:
+        if d.key in keys:
+            calm = dataclasses.replace(d, beta=1.2, reflexivity=0.15, usage_price_elasticity=0.0)
+            out[d.key] = {"as_designed": p_collapse(d, "crash", paths), "calm": p_collapse(calm, "crash", paths)}
+    return out
+
+
+def run() -> dict:
     RESULTS.mkdir(exist_ok=True)
     df, curves = run_matrix()
     df.to_csv(RESULTS / "stress_results.csv", index=False)
     curves.to_csv(RESULTS / "stress_paths.csv", index=False)
+    fixed, _ = run_matrix([REDESIGN])
+    fixed.to_csv(RESULTS / "redesign_results.csv", index=False)
 
     n, names = count_collapsed(df)
     per_scn = {s.key: sorted(df[(df.scenario == s.key) & df.collapsed]["design"]) for s in SCENARIOS}
@@ -146,21 +154,26 @@ def run(verbose: bool = True) -> dict:
             for r in df.itertuples()
             if r.scenario in CRASH_SCENARIOS and abs(r.p_collapse - MAJORITY) < BORDERLINE
         ],
+        "redesign": {
+            "key": REDESIGN.key,
+            "collapsed_in_crashes": count_collapsed(fixed)[0] > 0,
+            "steps": [{"label": label, **{k: p_collapse(d, k, PATHS) for k in CRASH_SCENARIOS}}
+                      for label, d in REDESIGN_STEPS],
+        },
+        "behaviour_check": behaviour_check(names),
         "sensitivity": sensitivity(),
     }
     (RESULTS / "stress_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    if verbose:
-        piv = df.pivot(index="design", columns="scenario", values="p_collapse")
-        piv = piv.loc[[d.key for d in DESIGNS], [s.key for s in SCENARIOS]]
-        print("P(collapse) by design and scenario")
-        print(piv.round(2).to_string())
-        print(f"\ncollapsed in crashes: {n} of {len(DESIGNS)} -> {names}")
-        print("  per scenario:", {k: len(v) for k, v in per_scn.items()})
-        print("  close calls:", [(c["design"], c["scenario"], round(c["p_collapse"], 3)) for c in summary["close_calls"]])
-        for k, v in summary["sensitivity"].items():
-            if isinstance(v, dict):
-                print(f"  {k}: " + ", ".join(f"{a}={b['count']}" for a, b in v.items()))
+    piv = pd.concat([df, fixed]).pivot(index="design", columns="scenario", values="p_collapse")
+    piv = piv.loc[[d.key for d in DESIGNS] + [REDESIGN.key], [s.key for s in SCENARIOS]]
+    print(piv.round(2).to_string())
+    print(f"\ncollapsed in crashes: {n} of {len(DESIGNS)} -> {names}")
+    print("  per scenario:", {k: len(v) for k, v in per_scn.items()})
+    print("  close calls:", [(c["design"], c["scenario"], round(c["p_collapse"], 3)) for c in summary["close_calls"]])
+    for k, v in summary["sensitivity"].items():
+        if isinstance(v, dict):
+            print(f"  {k}: " + ", ".join(f"{a}={b['count']}" for a, b in v.items()))
     return summary
 
 

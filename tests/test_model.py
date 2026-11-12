@@ -5,7 +5,7 @@ import pytest
 
 from tokenlab import model
 from tokenlab.calibrate import simulated_car
-from tokenlab.designs import BY_KEY, DESIGNS
+from tokenlab.designs import BY_KEY, DESIGNS, REDESIGN
 from tokenlab.model import Allocation, Scenario, TokenDesign
 from tokenlab.shocks import BY_KEY as SCN
 from tokenlab.shocks import SCENARIOS
@@ -16,6 +16,8 @@ def test_twelve_valid_designs():
     assert len({d.key for d in DESIGNS}) == 12
     for d in DESIGNS:
         d.validate()
+    REDESIGN.validate()
+    assert REDESIGN.key not in BY_KEY and REDESIGN.stable_debt == 0
 
 
 def test_allocation_schedule_releases_everything():
@@ -65,7 +67,6 @@ def test_bigger_crash_hurts_more():
 def test_unlock_impact_grows_with_size_and_shrinks_with_depth():
     assert simulated_car(0.30, "privateSale", 0.4) < simulated_car(0.05, "privateSale", 0.4) < 0
     assert simulated_car(0.10, "privateSale", 0.2) < simulated_car(0.10, "privateSale", 0.8)
-    # investors sell more than team members in the model
     assert simulated_car(0.10, "privateSale", 0.4) < simulated_car(0.10, "insiders", 0.4)
 
 

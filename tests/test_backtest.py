@@ -15,7 +15,8 @@ def test_sample_has_sixty_distinct_real_events():
     assert not ev.duplicated(["slug", "date"]).any()
     assert ev["pct_circ"].between(0.01, 1.0).all()
     assert ev.groupby("slug").size().max() <= 3
-    # same-token events never have overlapping [-30, +30] windows
+    assert ev["symbol"].notna().all()
+    assert (ev["tokens_unlocked"] <= ev["circ_before"]).all()
     for _, g in ev.sort_values("date").groupby("slug"):
         assert (g["date"].diff().dropna().dt.days >= 61).all()
 

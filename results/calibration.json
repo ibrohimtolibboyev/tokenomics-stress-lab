@@ -1,11 +1,11 @@
 {
-  "target_mean_car_log": -0.16121049848749652,
+  "target_mean_car_log": -0.1798140896263486,
   "n_events": 60,
   "default_depth": 0.5,
-  "depth": 0.358874508663847,
+  "depth": 0.2675162085856295,
   "calibrated": true,
-  "simulated_mean_car_log": -0.16121049848779437,
-  "simulated_median_car_log": -0.05708113426629881,
-  "empirical_median_car_log": -0.21132428201327105,
-  "corr_sim_vs_actual": 0.37226246400630203
+  "simulated_mean_car_log": -0.1798140896257717,
+  "simulated_median_car_log": -0.062216781207431085,
+  "empirical_median_car_log": -0.20248313086626946,
+  "corr_sim_vs_actual": 0.39797952433113654
 }

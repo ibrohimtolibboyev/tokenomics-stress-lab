@@ -2,7 +2,7 @@
   "n_designs": 12,
   "paths": 4000,
   "seed": 2026,
-  "depth": 0.358874508663847,
+  "depth": 0.2675162085856295,
   "collapse_definition": ">= 90% below the pre-shock price in more than 50% of paths",
   "crash_scenarios": [
     "crash",
@@ -31,7 +31,6 @@
     "crash": [
       "algo_stable",
       "leveraged_collateral",
-      "liquidity_farm",
       "lowfloat_vc",
       "memecoin",
       "play_to_earn",
@@ -40,7 +39,6 @@
     "crash_at_unlock": [
       "algo_stable",
       "leveraged_collateral",
-      "liquidity_farm",
       "lowfloat_vc",
       "memecoin",
       "play_to_earn",
@@ -57,12 +55,13 @@
     ],
     "demand": [
       "algo_stable",
-      "lowfloat_vc",
       "memecoin",
       "play_to_earn",
       "ve_lock"
     ],
     "liquidity": [
+      "algo_stable",
+      "leveraged_collateral",
       "lowfloat_vc",
       "play_to_earn",
       "ve_lock"
@@ -72,29 +71,79 @@
     {
       "design": "pos_l1",
       "scenario": "bear",
-      "p_collapse": 0.47025
-    },
-    {
-      "design": "ve_lock",
-      "scenario": "crash",
-      "p_collapse": 0.53725
-    },
-    {
-      "design": "ve_lock",
-      "scenario": "crash_at_unlock",
-      "p_collapse": 0.53725
+      "p_collapse": 0.4515
     },
     {
       "design": "liquidity_farm",
-      "scenario": "crash",
-      "p_collapse": 0.50375
+      "scenario": "bear",
+      "p_collapse": 0.504
     },
     {
-      "design": "liquidity_farm",
-      "scenario": "crash_at_unlock",
-      "p_collapse": 0.50375
+      "design": "leveraged_collateral",
+      "scenario": "crash",
+      "p_collapse": 0.54075
     }
   ],
+  "redesign": {
+    "key": "reserve_stable",
+    "collapsed_in_crashes": false,
+    "steps": [
+      {
+        "label": "As tested (algorithmic stablecoin)",
+        "crash": 0.554,
+        "crash_at_unlock": 0.55825,
+        "bear": 0.61
+      },
+      {
+        "label": "Redemptions paid from reserves, no token minting",
+        "crash": 0.56225,
+        "crash_at_unlock": 0.61325,
+        "bear": 0.64575
+      },
+      {
+        "label": "+ stablecoin demand no longer follows the token price",
+        "crash": 0.40975,
+        "crash_at_unlock": 0.463,
+        "bear": 0.4685
+      },
+      {
+        "label": "+ 30% of fees paid to stakers (final design)",
+        "crash": 0.3635,
+        "crash_at_unlock": 0.421,
+        "bear": 0.42875
+      }
+    ]
+  },
+  "behaviour_check": {
+    "ve_lock": {
+      "as_designed": 0.546,
+      "calm": 0.3405
+    },
+    "lowfloat_vc": {
+      "as_designed": 0.669,
+      "calm": 0.384
+    },
+    "liquidity_farm": {
+      "as_designed": 0.4025,
+      "calm": 0.127
+    },
+    "algo_stable": {
+      "as_designed": 0.544,
+      "calm": 0.4605
+    },
+    "play_to_earn": {
+      "as_designed": 0.7055,
+      "calm": 0.407
+    },
+    "memecoin": {
+      "as_designed": 0.8125,
+      "calm": 0.3325
+    },
+    "leveraged_collateral": {
+      "as_designed": 0.529,
+      "calm": 0.2765
+    }
+  },
   "sensitivity": {
     "paths": 2000,
     "crash_severity": {
@@ -112,18 +161,18 @@
         ]
       },
       "50%": {
-        "count": 2,
+        "count": 3,
         "designs": [
+          "lowfloat_vc",
           "play_to_earn",
           "memecoin"
         ]
       },
       "60%": {
-        "count": 7,
+        "count": 6,
         "designs": [
           "ve_lock",
           "lowfloat_vc",
-          "liquidity_farm",
           "algo_stable",
           "play_to_earn",
           "memecoin",
@@ -190,11 +239,10 @@
         ]
       },
       "90%": {
-        "count": 7,
+        "count": 6,
         "designs": [
           "ve_lock",
           "lowfloat_vc",
-          "liquidity_farm",
           "algo_stable",
           "play_to_earn",
           "memecoin",
@@ -211,12 +259,10 @@
     },
     "market_depth": {
       "x0.5": {
-        "count": 6,
+        "count": 4,
         "designs": [
           "ve_lock",
           "lowfloat_vc",
-          "algo_stable",
-          "play_to_earn",
           "memecoin",
           "leveraged_collateral"
         ]
@@ -233,11 +279,10 @@
         ]
       },
       "x1.0": {
-        "count": 7,
+        "count": 6,
         "designs": [
           "ve_lock",
           "lowfloat_vc",
-          "liquidity_farm",
           "algo_stable",
           "play_to_earn",
           "memecoin",
@@ -282,11 +327,10 @@
         ]
       },
       "2": {
-        "count": 7,
+        "count": 6,
         "designs": [
           "ve_lock",
           "lowfloat_vc",
-          "liquidity_farm",
           "algo_stable",
           "play_to_earn",
           "memecoin",
