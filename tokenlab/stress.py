@@ -116,6 +116,25 @@ def p_collapse(design, scenario_key: str, paths: int, seed: int = SEED) -> float
     return float((res.max_drawdown() >= COLLAPSE_DRAWDOWN).mean())
 
 
+WIPEOUT_LEVEL = 0.01      # ends (last 30 days) below 1% of the pre-shock price
+SUPPLY_BLOWUP = 10.0      # circulating supply ends more than 10x where it started
+
+
+def step_metrics(design, paths: int, seed: int = SEED) -> dict:
+    """For one redesign step: P(collapse) per crash scenario (the 90% test), plus two outcomes
+    the 90% test cannot tell apart from an ordinary deep crash: ending near zero, and runaway
+    dilution of circulating supply."""
+    out = {"wipeout": {}, "supply_blowup": {}, "pre_shock_price": {}}
+    for k in ("baseline", *CRASH_SCENARIOS):
+        res = model.simulate(design, SCENARIO_BY_KEY[k], paths=paths, seed=seed, depth=calibrated_depth())
+        if k in CRASH_SCENARIOS:
+            out[k] = float((res.max_drawdown() >= COLLAPSE_DRAWDOWN).mean())
+        out["wipeout"][k] = float((res.terminal_ratio() < WIPEOUT_LEVEL).mean())
+        out["supply_blowup"][k] = float((res.supply[:, -1] / res.supply[:, 0] > SUPPLY_BLOWUP).mean())
+        out["pre_shock_price"][k] = float(np.median(res.pre_shock_price() / res.price[:, 0]))
+    return out
+
+
 def behaviour_check(keys: list[str], paths: int = 2000) -> dict:
     """P(collapse) in the fast crash with beta, reflexivity and price-led usage set to the
     values the surviving designs use, everything else unchanged."""
@@ -157,8 +176,9 @@ def run() -> dict:
         "redesign": {
             "key": REDESIGN.key,
             "collapsed_in_crashes": count_collapsed(fixed)[0] > 0,
-            "steps": [{"label": label, **{k: p_collapse(d, k, PATHS) for k in CRASH_SCENARIOS}}
-                      for label, d in REDESIGN_STEPS],
+            "wipeout_level": WIPEOUT_LEVEL,
+            "supply_blowup": SUPPLY_BLOWUP,
+            "steps": [{"label": label, **step_metrics(d, PATHS)} for label, d in REDESIGN_STEPS],
         },
         "behaviour_check": behaviour_check(names),
         "sensitivity": sensitivity(),

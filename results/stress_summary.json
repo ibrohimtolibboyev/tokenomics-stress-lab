@@ -87,27 +87,101 @@
   "redesign": {
     "key": "reserve_stable",
     "collapsed_in_crashes": false,
+    "wipeout_level": 0.01,
+    "supply_blowup": 10.0,
     "steps": [
       {
         "label": "As tested (algorithmic stablecoin)",
+        "wipeout": {
+          "baseline": 0.179,
+          "crash": 0.4335,
+          "crash_at_unlock": 0.4485,
+          "bear": 0.44075
+        },
+        "supply_blowup": {
+          "baseline": 0.633,
+          "crash": 0.88575,
+          "crash_at_unlock": 0.89075,
+          "bear": 0.89175
+        },
+        "pre_shock_price": {
+          "baseline": 0.4616078438138478,
+          "crash": 0.4616078438138478,
+          "crash_at_unlock": 0.546118290806412,
+          "bear": 0.4616078438138478
+        },
         "crash": 0.554,
         "crash_at_unlock": 0.55825,
         "bear": 0.61
       },
       {
         "label": "Redemptions paid from reserves, no token minting",
+        "wipeout": {
+          "baseline": 0.00025,
+          "crash": 0.005,
+          "crash_at_unlock": 0.00575,
+          "bear": 0.01525
+        },
+        "supply_blowup": {
+          "baseline": 0.0,
+          "crash": 0.0,
+          "crash_at_unlock": 0.0,
+          "bear": 0.0
+        },
+        "pre_shock_price": {
+          "baseline": 0.7450561938833111,
+          "crash": 0.7450561938833111,
+          "crash_at_unlock": 0.8045617408790382,
+          "bear": 0.7450561938833111
+        },
         "crash": 0.56225,
         "crash_at_unlock": 0.61325,
         "bear": 0.64575
       },
       {
         "label": "+ stablecoin demand no longer follows the token price",
+        "wipeout": {
+          "baseline": 0.0,
+          "crash": 0.0,
+          "crash_at_unlock": 0.0,
+          "bear": 0.00075
+        },
+        "supply_blowup": {
+          "baseline": 0.0,
+          "crash": 0.0,
+          "crash_at_unlock": 0.0,
+          "bear": 0.0
+        },
+        "pre_shock_price": {
+          "baseline": 0.8574978683729932,
+          "crash": 0.8574978683729932,
+          "crash_at_unlock": 0.910961371867647,
+          "bear": 0.8574978683729932
+        },
         "crash": 0.40975,
         "crash_at_unlock": 0.463,
         "bear": 0.4685
       },
       {
         "label": "+ 30% of fees paid to stakers (final design)",
+        "wipeout": {
+          "baseline": 0.0,
+          "crash": 0.0,
+          "crash_at_unlock": 0.0,
+          "bear": 0.0005
+        },
+        "supply_blowup": {
+          "baseline": 0.0,
+          "crash": 0.0,
+          "crash_at_unlock": 0.0,
+          "bear": 0.0
+        },
+        "pre_shock_price": {
+          "baseline": 0.8715837839653271,
+          "crash": 0.8715837839653271,
+          "crash_at_unlock": 0.921039078159547,
+          "bear": 0.8715837839653271
+        },
         "crash": 0.3635,
         "crash_at_unlock": 0.421,
         "bear": 0.42875

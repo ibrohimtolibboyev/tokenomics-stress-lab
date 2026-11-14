@@ -21,7 +21,9 @@ A Python simulator for token economies, calibrated on real unlock data and used 
   farm, collapses only in the prolonged bear and at 50.4% of paths, which is a coin-flip. The
   count also moves with the crash size: 3 designs collapse in a 50% crash, 8 in a 70% crash.
 - **A 13th design.** A reserve-backed rework of the algorithmic-stablecoin token brings its
-  worst-case collapse probability from 61% to 43%.
+  worst-case collapse probability from 61% to 43%. The bigger change is one the 90% test hides:
+  the original ends near zero in 44% of bear-market paths and its supply grows more than 10x in
+  89% of them (63% even with no shock); the rework does neither.
 
 ![Collapse probability by design and scenario](results/figures/stress_heatmap.png)
 

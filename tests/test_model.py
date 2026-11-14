@@ -85,3 +85,15 @@ def test_algo_stable_run_mints_supply():
     p = model.simulate(plain, SCN["bear"], paths=200, seed=2)
     assert np.median(r.supply[:, -1]) > np.median(p.supply[:, -1])
     assert np.median(r.max_drawdown()) >= np.median(p.max_drawdown())
+
+
+def test_reserve_backing_removes_wipeouts_and_dilution():
+    """Section 4: the 90% test barely moves, but paying redemptions from reserves removes the
+    near-zero endings and the runaway supply growth."""
+    from tokenlab.stress import step_metrics
+
+    algo = step_metrics(BY_KEY["algo_stable"], paths=400, seed=7)
+    reserve = step_metrics(dataclasses.replace(BY_KEY["algo_stable"], stable_debt=0.0), paths=400, seed=7)
+    assert algo["supply_blowup"]["baseline"] > 0.3 > reserve["supply_blowup"]["baseline"]
+    assert algo["wipeout"]["bear"] > 0.2 > reserve["wipeout"]["bear"]
+    assert algo["pre_shock_price"]["crash"] < reserve["pre_shock_price"]["crash"]

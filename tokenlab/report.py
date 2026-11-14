@@ -207,7 +207,10 @@ def build() -> str:
     A(f"- **A 13th design.** Reworking the algorithmic-stablecoin token so the stablecoin is reserve-backed "
       f"takes its worst crash-scenario collapse probability from "
       f"{max(red['steps'][0][k] for k in ss['crash_scenarios']) * 100:.0f}% to {worst * 100:.0f}%"
-      f"{'' if red['collapsed_in_crashes'] else ', below the 50% line'} (section 4).\n")
+      f"{'' if red['collapsed_in_crashes'] else ', below the 50% line'}. The 90% test understates the change: "
+      f"in the prolonged bear market the original ends near zero in "
+      f"{red['steps'][0]['wipeout']['bear'] * 100:.0f}% of paths and the reworked token in "
+      f"{red['steps'][-1]['wipeout']['bear'] * 100:.0f}% (section 4).\n")
 
     A("## 1. Backtest: real unlock events\n")
     A("**Data.** Vesting schedules and cliff events are from DefiLlama's open emissions datasets, daily prices "
@@ -327,18 +330,46 @@ def build() -> str:
     A(f"**{REDESIGN.name}.** {REDESIGN.description} It starts from the {REDESIGN_OF.name.lower()} and changes "
       "one thing at a time; beta and reflexivity are left as they were. It was built after seeing the results "
       "above and is not part of the 12.\n")
+    steps = red["steps"]
+    algo, reserve, final = steps[0], steps[1], steps[-1]
+    pct = lambda x: f"{x * 100:.0f}%"  # noqa: E731
+    A("**P(collapse): falls at least 90% below the pre-crash price.**\n")
     A("| Step | Crash | Crash at unlock | Prolonged bear |")
     A("|---|---|---|---|")
-    for step in red["steps"]:
-        A(f"| {step['label']} | " + " | ".join(f"{step[k] * 100:.0f}%" for k in ss["crash_scenarios"]) + " |")
+    for step in steps:
+        A(f"| {step['label']} | " + " | ".join(pct(step[k]) for k in ss["crash_scenarios"]) + " |")
     A("")
     A("Across all scenarios the final design's collapse probability is "
       + ", ".join(f"{fixed.loc[s.key, 'p_collapse'] * 100:.0f}% ({s.name.lower()})" for s in SCENARIOS) + ". "
       + ("It still collapses in at least one crash scenario." if red["collapsed_in_crashes"] else
          "It stays under 50% in every scenario" + (", though narrowly in the worst one." if worst > 0.45 else "."))
-      + " Removing the mint-on-redemption loop does little by itself, because in this model the run only "
-      "starts once the token has already lost most of its value; the step that matters is making stablecoin "
-      "demand independent of the token price.\n")
+      + " That is a majority rule, not safety: in its worst scenario about "
+      f"{round(worst * 10)} in 10 paths still fall 90%.\n")
+
+    A("**What the 90% test misses.** A token that falls 91% and recovers and a token that goes to zero while "
+      "its supply explodes both count as one collapse. Two more measures separate them: the share of paths "
+      f"that end (last 30 days) below {red['wipeout_level']:.0%} of the pre-crash price, and the share whose "
+      f"circulating supply ends more than {red['supply_blowup']:.0f}x where it started.\n")
+    A("| Step | Ends near zero, crash | Ends near zero, prolonged bear | Supply over 10x, no shock "
+      "| Supply over 10x, prolonged bear |")
+    A("|---|---|---|---|---|")
+    for step in steps:
+        A(f"| {step['label']} | {pct(step['wipeout']['crash'])} | {pct(step['wipeout']['bear'])} | "
+          f"{pct(step['supply_blowup']['baseline'])} | {pct(step['supply_blowup']['bear'])} |")
+    A("")
+    A(f"Read this way, the first step is the big one. The original token hyperinflates even with no shock: "
+      f"its circulating supply grows more than 10x in {pct(algo['supply_blowup']['baseline'])} of no-shock paths "
+      f"and {pct(algo['supply_blowup']['bear'])} of bear-market paths, and in the bear market it ends near zero "
+      f"in {pct(algo['wipeout']['bear'])} of paths. Paying redemptions from reserves takes those to "
+      f"{pct(reserve['supply_blowup']['baseline'])}, {pct(reserve['supply_blowup']['bear'])} and "
+      f"{pct(reserve['wipeout']['bear'])}. Its 90% collapse rate does not fall with it, for two reasons: in a 60% "
+      "to 75% market crash this token falls close to 90% with or without the loop, and the original has less left to lose because "
+      f"it is already bleeding before the shock (median price just before the crash {algo['pre_shock_price']['crash']:.2f} "
+      f"of launch, against {reserve['pre_shock_price']['crash']:.2f} for the reserve-backed version). So the "
+      "mint-on-redemption loop is what turns a deep crash into a wipeout, and making stablecoin demand "
+      "independent of the token price is what pulls the token out of the 90% zone.\n")
+    A("One caution on the last step: the model counts fees paid to stakers toward the token's fair value and "
+      "fees the protocol keeps toward none of it, so part of that step's effect is built into the model.\n")
 
     A("## 5. Limitations\n")
     A("- The designs are archetypes with round-number parameters chosen by the author. The collapse count "
@@ -346,7 +377,9 @@ def build() -> str:
       "- Only market depth is fitted to data. Beta, reflexivity, price-led usage and sell fractions are "
       "assumptions, and section 3 shows the verdicts are sensitive to them.\n"
       "- Collapse is measured from the pre-shock price, so a design that has already bled before the shock has "
-      "less left to lose and can look sturdier than it is.\n"
+      "less left to lose and can look sturdier than it is. The algorithmic-stablecoin token in section 4 is a "
+      "clear case. The 90% test also cannot separate a deep crash from a wipeout; section 4 adds two measures "
+      "that can, but only for the 13th design.\n"
       "- The count moves with the collapse threshold, crash size and seed.\n"
       f"- The backtest is {bt['n_events']} events. Unlock dates are public in advance, so abnormal returns mix "
       "anticipation with selling; t-statistics ignore clustering of events in time.\n"

@@ -8,7 +8,7 @@ Independent simulations of token supply, unlocks and incentives under shocks.
 - **Stress test.** 12 token designs, 6 scenarios, 4,000 Monte Carlo paths each. **7 of 12 designs collapsed in crashes**: they fell at least 90% below their pre-crash price in most paths in at least one of the three market-crash scenarios (market crash: 6; crash at the largest unlock: 6; prolonged bear market: 7). Collapsed: Algorithmic-stablecoin share token, Leveraged-collateral governance token, Liquidity-mining farm token, Low-float / high-FDV VC token, Memecoin, Play-to-earn reward token, Vote-escrow emissions DEX. Survived: Burn-and-mint (DePIN), Fair-launch capped supply, Proof-of-stake L1, High-APY rebase / protocol-owned liquidity, Revenue buyback-and-burn.
 - **Close calls.** These verdicts are within 5 points of the 50% line and are coin-flips: Proof-of-stake L1 in prolonged bear market (45.1%); Liquidity-mining farm token in prolonged bear market (50.4%); Leveraged-collateral governance token in market crash (54.1%).
 - **The count depends on the crash size.** 3 designs collapse in a 50% crash, 6 at 60% and 8 at 70% (fast crash only).
-- **A 13th design.** Reworking the algorithmic-stablecoin token so the stablecoin is reserve-backed takes its worst crash-scenario collapse probability from 61% to 43%, below the 50% line (section 4).
+- **A 13th design.** Reworking the algorithmic-stablecoin token so the stablecoin is reserve-backed takes its worst crash-scenario collapse probability from 61% to 43%, below the 50% line. The 90% test understates the change: in the prolonged bear market the original ends near zero in 44% of paths and the reworked token in 0% (section 4).
 
 ## 1. Backtest: real unlock events
 
@@ -146,6 +146,8 @@ Each design also carries three behavioural assumptions: market beta, reflexivity
 
 **Reserve-backed stablecoin governance token.** The algorithmic-stablecoin design with the stablecoin fully backed by external reserves: redemptions are paid from reserves instead of minting tokens, so stablecoin demand no longer follows the token price, and 30% of fees go to stakers. It starts from the algorithmic-stablecoin share token and changes one thing at a time; beta and reflexivity are left as they were. It was built after seeing the results above and is not part of the 12.
 
+**P(collapse): falls at least 90% below the pre-crash price.**
+
 | Step | Crash | Crash at unlock | Prolonged bear |
 |---|---|---|---|
 | As tested (algorithmic stablecoin) | 55% | 56% | 61% |
@@ -153,13 +155,26 @@ Each design also carries three behavioural assumptions: market beta, reflexivity
 | + stablecoin demand no longer follows the token price | 41% | 46% | 47% |
 | + 30% of fees paid to stakers (final design) | 36% | 42% | 43% |
 
-Across all scenarios the final design's collapse probability is 4% (baseline), 36% (market crash), 42% (crash at the largest unlock), 43% (prolonged bear market), 35% (demand shock), 24% (liquidity shock). It stays under 50% in every scenario. Removing the mint-on-redemption loop does little by itself, because in this model the run only starts once the token has already lost most of its value; the step that matters is making stablecoin demand independent of the token price.
+Across all scenarios the final design's collapse probability is 4% (baseline), 36% (market crash), 42% (crash at the largest unlock), 43% (prolonged bear market), 35% (demand shock), 24% (liquidity shock). It stays under 50% in every scenario. That is a majority rule, not safety: in its worst scenario about 4 in 10 paths still fall 90%.
+
+**What the 90% test misses.** A token that falls 91% and recovers and a token that goes to zero while its supply explodes both count as one collapse. Two more measures separate them: the share of paths that end (last 30 days) below 1% of the pre-crash price, and the share whose circulating supply ends more than 10x where it started.
+
+| Step | Ends near zero, crash | Ends near zero, prolonged bear | Supply over 10x, no shock | Supply over 10x, prolonged bear |
+|---|---|---|---|---|
+| As tested (algorithmic stablecoin) | 43% | 44% | 63% | 89% |
+| Redemptions paid from reserves, no token minting | 0% | 2% | 0% | 0% |
+| + stablecoin demand no longer follows the token price | 0% | 0% | 0% | 0% |
+| + 30% of fees paid to stakers (final design) | 0% | 0% | 0% | 0% |
+
+Read this way, the first step is the big one. The original token hyperinflates even with no shock: its circulating supply grows more than 10x in 63% of no-shock paths and 89% of bear-market paths, and in the bear market it ends near zero in 44% of paths. Paying redemptions from reserves takes those to 0%, 0% and 2%. Its 90% collapse rate does not fall with it, for two reasons: in a 60% to 75% market crash this token falls close to 90% with or without the loop, and the original has less left to lose because it is already bleeding before the shock (median price just before the crash 0.46 of launch, against 0.75 for the reserve-backed version). So the mint-on-redemption loop is what turns a deep crash into a wipeout, and making stablecoin demand independent of the token price is what pulls the token out of the 90% zone.
+
+One caution on the last step: the model counts fees paid to stakers toward the token's fair value and fees the protocol keeps toward none of it, so part of that step's effect is built into the model.
 
 ## 5. Limitations
 
 - The designs are archetypes with round-number parameters chosen by the author. The collapse count describes these designs under this model, not how many real tokens would fail.
 - Only market depth is fitted to data. Beta, reflexivity, price-led usage and sell fractions are assumptions, and section 3 shows the verdicts are sensitive to them.
-- Collapse is measured from the pre-shock price, so a design that has already bled before the shock has less left to lose and can look sturdier than it is.
+- Collapse is measured from the pre-shock price, so a design that has already bled before the shock has less left to lose and can look sturdier than it is. The algorithmic-stablecoin token in section 4 is a clear case. The 90% test also cannot separate a deep crash from a wipeout; section 4 adds two measures that can, but only for the 13th design.
 - The count moves with the collapse threshold, crash size and seed.
 - The backtest is 60 events. Unlock dates are public in advance, so abnormal returns mix anticipation with selling; t-statistics ignore clustering of events in time.
 - The sample takes the largest unlocks among tokens with price and supply data, which tilts it toward larger, surviving tokens. Schedules come from one provider and circulating supply from another; either can be wrong.
